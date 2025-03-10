@@ -1,0 +1,1213 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Matrix Editor</title>
+    <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Math&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #ffffff;
+            font-family: sans-serif;
+        }
+        .matrix-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 20px;
+        }
+        .matrix-row {
+            display: flex;
+            align-items: center;
+            height: 50px;
+        }
+        .matrix-cell {
+            width: 40px;
+            height: 40px;
+            margin: 2px;
+            text-align: center;
+            /* background-color: #333333; */
+            background-color: transparent;
+            color: #ffffff;
+            /* border: 1px solid #555555; */
+            border: 1px solid transparent;
+            outline: none;
+            border: none;
+            &:focus {
+                border: none;
+                outline: none;
+            }
+        }
+        .matrix-cell-zero {
+            background-color: transparent;
+            border: 1px solid transparent;
+            /* border: 1px solid #222; */
+            color: #444;
+        }
+        .matrix-cell-readonly {
+            /* background-color: #444; */
+            background-color: transparent;
+            pointer-events: none;
+        }
+        .size-control {
+            margin: 20px;
+        }
+        .size-control input {
+            background-color: #333333;
+            color: #ffffff;
+            /* border: 1px solid #555555; */
+            padding: 4px;
+        }
+        label {
+            color: #ffffff;
+        }
+        .matrix-separator {
+            margin: 0 10px;
+            font-size: 24px;
+            color: #555;
+        }
+        .matrix-label {
+            margin: 0 5px;
+            color: #888;
+            font-size: 0.8em;
+        }
+        .matrix-corner {
+            font-family: 'Noto Sans Math', sans-serif;
+            font-size: 24px;
+            color: #555;
+            margin: 0 5px;
+            pointer-events: none;
+        }
+        .matrix-editable .matrix-corner {
+            color: #4a8b8aaa;
+        }
+        .matrix-corner-left {
+            align-self: flex-start;
+        }
+        .matrix-corner-right {
+            align-self: flex-end;
+        }
+        .matrix-wrapper {
+            display: flex;
+            align-items: center;
+        }
+
+        button {
+            background-color: #333333;
+            color: #ffffff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: #444444;
+        }
+
+        button:active {
+            background-color: #222222;
+        }
+
+        button:disabled {
+            background-color: #222222;
+            color: #666666;
+            cursor: not-allowed;
+        }
+
+        .variable-label {
+            color: #282828;
+            size: 0.9em;
+            cursor: pointer;
+        }
+        
+        .variable-label:hover {
+            color: #505050;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        function MatrixElement({ value, onChange, readOnly }) {
+            // Clean up value string
+            const cleanupValue = (val) => {
+                let str = String(val);
+                if (str.endsWith('00001')) {
+                    str = str.replace(/0*1$/, '');
+                } else if (str.endsWith('99999')) {
+                    str = str.replace(/9*$/, '');
+                }
+                return str;
+            };
+            const displayValue = cleanupValue(value);
+            return (
+                <input
+                    type="text"
+                    className={`matrix-cell ${value == 0 ? 'matrix-cell-zero' : ''} ${readOnly ? 'matrix-cell-readonly' : ''}`}
+                    value={document.activeElement !== document.getElementById('root').querySelector(':focus') ? displayValue.replace(/\.0*?$/, '') : displayValue}
+                    onChange={onChange}
+                    readOnly={readOnly}
+                    onClick={(e) => {
+                        e.target.select();
+                    }}
+                    onKeyDown={(e) => {
+                        if (!readOnly) {
+                            if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                onChange({ target: { value: String((parseFloat(value) || 0) + 1) } });
+                            } else if (e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                onChange({ target: { value: String((parseFloat(value) || 0) - 1) } });
+                            }
+                        }
+                    }}
+                    onWheel={(e) => {
+                        if (!readOnly) {
+                            onChange({ target: { value: String((parseFloat(value) || 0) + (e.deltaY < 0 ? 1 : -1)) } });
+                        }
+                    }}
+                    onContextMenu={(e) => {
+                        e.preventDefault();
+                        if (!readOnly) {
+                            onChange({ target: { value: String(0) } });
+                        }
+                    }}
+                    onMouseEnter={() => { 
+                        if (document.body.scrollHeight > window.innerHeight) {
+                            document.body.style.overflow = 'hidden';
+                            document.body.style.paddingRight = (window.innerWidth - document.body.clientWidth) + 'px';
+                        }
+                    }}
+                    onMouseLeave={() => { 
+                        if (document.body.scrollHeight > window.innerHeight) {
+                            document.body.style.overflow = '';
+                            document.body.style.paddingRight = '';
+                        }
+                    }}
+                    title={displayValue}
+                />
+            );
+        }
+
+        function solveLinearSystem(A, b) {
+            const n = A.length;
+            
+            // Convert strings to numbers
+            const matA = A.map(row => row.map(val => Number(val) || 0));
+            const matB = b.map(row => Number(row[0]) || 0);
+            
+            // Gaussian elimination
+            for(let i = 0; i < n; i++) {
+                // Find pivot
+                let maxEl = Math.abs(matA[i][i]);
+                let maxRow = i;
+                for(let k = i + 1; k < n; k++) {
+                    if(Math.abs(matA[k][i]) > maxEl) {
+                        maxEl = Math.abs(matA[k][i]);
+                        maxRow = k;
+                    }
+                }
+
+                // Swap maximum row with current row
+                for(let k = i; k < n; k++) {
+                    const tmp = matA[maxRow][k];
+                    matA[maxRow][k] = matA[i][k];
+                    matA[i][k] = tmp;
+                }
+                const tmp = matB[maxRow];
+                matB[maxRow] = matB[i];
+                matB[i] = tmp;
+
+                // Make all rows below this one 0 in current column
+                for(let k = i + 1; k < n; k++) {
+                    const c = -matA[k][i] / matA[i][i];
+                    for(let j = i; j < n; j++) {
+                        if(i === j) {
+                            matA[k][j] = 0;
+                        } else {
+                            matA[k][j] += c * matA[i][j];
+                        }
+                    }
+                    matB[k] += c * matB[i];
+                }
+            }
+
+            // Back substitution
+            const x = new Array(n).fill(0);
+            for(let i = n - 1; i >= 0; i--) {
+                x[i] = matB[i] / matA[i][i];
+                for(let k = i - 1; k >= 0; k--) {
+                    matB[k] -= matA[k][i] * x[i];
+                }
+            }
+
+            return x.map(val => [val]);
+        }
+
+        function MatrixRenderer({ matrix, readOnly, handleCellChange, name, top_label, left_label, onVariableClick }) {
+            return (
+                <div className={!readOnly ? 'matrix-editable' : ''} style={{ display: 'flex', alignItems: 'center', position: 'relative' }}>
+                    <div style={{
+                        position: 'absolute',
+                        width: '100%',
+                        height: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#FFFFFF03',
+                        fontSize: '6em',
+                        fontWeight: 'bold',
+                        userSelect: 'none',
+                        pointerEvents: 'none',
+                        zIndex: -1
+                    }}>
+                        {name}
+                    </div>
+                    {top_label && (
+                        <div style={{
+                            position: 'absolute',
+                            top: '-20px',
+                            left: '0',
+                            right: '0',
+                            display: 'flex',
+                            justifyContent: 'space-around',
+                            color: '#888',
+                            fontSize: '0.9em',
+                            margin: '0 20px'
+                        }}>
+                            {matrix[0].map((_, i) => (
+                                <span 
+                                    className="variable-label" 
+                                    key={i} 
+                                    style={{
+                                        transform: 'rotate(-90deg)',
+                                        transformOrigin: 'center center',
+                                        display: 'inline-block',
+                                        width: '20px'
+                                    }}
+                                    onClick={() => onVariableClick && onVariableClick(i)}
+                                >
+                                    {top_label[i] || `x${i + 1}`}
+                                </span>
+                            ))}
+                        </div>
+                    )}
+                    <span className="matrix-corner matrix-corner-left">⌜</span>
+                    <div>
+                        {matrix.map((row, rowIndex) => (
+                            
+                            <div key={rowIndex} style={{ display: 'flex', alignItems: 'center' }}>
+                                {left_label && (
+                                    <div className="variable-label" style={{
+                                        textAlign: 'right',
+                                        width: '20px'
+                                    }}>
+                                        {left_label[rowIndex] || `x${rowIndex + 1}`}
+                                    </div>
+                                )}
+                                <div className="matrix-row">
+                                    {Array.isArray(row) ? (
+                                        row.map((cell, colIndex) => (
+                                            <MatrixElement
+                                                key={colIndex}
+                                                value={readOnly ? (Number.isInteger(Number(cell)) ? Number(cell) : Number(cell).toFixed(2)) : cell}
+                                                readOnly={readOnly}
+                                                onChange={(e) => handleCellChange(rowIndex, colIndex, e.target.value)}
+                                            />
+                                        ))
+                                    ) : (
+                                        <MatrixElement
+                                            value={readOnly ? (Number.isInteger(Number(row)) ? Number(row) : Number(row).toFixed(2)) : row}
+                                            readOnly={readOnly}
+                                            onChange={(e) => handleCellChange(rowIndex, 0, e.target.value)}
+                                        />
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <span className="matrix-corner matrix-corner-right">⌟</span>
+                </div>
+            );
+        }
+
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        const debouncedFetch = debounce(async (matrix) => {
+            try {
+                const response = await fetch('/set_matrix', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ matrix })
+                });
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }, 500);
+
+        function Matrix() {
+            // Get data from URL if it exists
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlData = urlParams.get('data');
+            let initialData = null;
+            
+            if (urlData) {
+                try {
+                    initialData = JSON.parse(atob(urlData));
+                } catch (e) {
+                    console.error('Failed to parse URL data');
+                }
+            }
+
+            const [size, setSize] = React.useState(() => {
+                if (initialData) return initialData.size;
+                const savedSize = localStorage.getItem('matrixSize');
+                return savedSize ? parseInt(savedSize) : 2;
+            });
+            
+            const [matrixA, setMatrixA] = React.useState(() => {
+                if (initialData) return initialData.matrixA;
+                const savedMatrix = localStorage.getItem('matrixAValues');
+                if (savedMatrix) {
+                    return JSON.parse(savedMatrix);
+                }
+                return Array(size).fill().map(() => Array(size).fill(0));
+            });
+
+            const [matrixX, setMatrixX] = React.useState(() => {
+                if (initialData) return initialData.matrixX;
+                const savedMatrix = localStorage.getItem('matrixXValues');
+                if (savedMatrix) {
+                    return JSON.parse(savedMatrix);
+                }
+                return Array(size).fill().map(() => [0]);
+            });
+
+            const [matrixB, setMatrixB] = React.useState(() => {
+                if (initialData) return initialData.matrixB;
+                const savedMatrix = localStorage.getItem('matrixBValues');
+                if (savedMatrix) {
+                    return JSON.parse(savedMatrix);
+                }
+                return Array(size).fill().map(() => [0]);
+            });
+
+            const [inverseA, setInverseA] = React.useState(() => Array(size).fill().map(() => Array(size).fill(0)));
+            
+            const [matrixX2, setMatrixX2] = React.useState(() => {
+                if (initialData) return initialData.matrixX2;
+                const savedMatrix = localStorage.getItem('matrixX2Values');
+                if (savedMatrix) {
+                    return JSON.parse(savedMatrix);
+                }
+                return Array(size).fill().map(() => [0]);
+            });
+            const [matrixB2, setMatrixB2] = React.useState(() => Array(size).fill().map(() => [0]));
+            
+            const [variables, setVariables] = React.useState(() => {
+                if (initialData) return initialData.variables;
+                const savedVariables = localStorage.getItem('variables');
+                if (savedVariables) {
+                    return JSON.parse(savedVariables);
+                }
+                return [];
+            });
+            const [equationText, setEquationText] = React.useState('');
+
+            const generateShareableLink = () => {
+                const data = {
+                    size,
+                    matrixA,
+                    matrixX,
+                    matrixB,
+                    matrixX2,
+                    variables
+                };
+                const encoded = btoa(JSON.stringify(data));
+                const url = `${window.location.origin}${window.location.pathname}?data=${encoded}`;
+                
+                // Update URL without reloading
+                window.history.pushState({}, '', url);
+                // Copy to clipboard
+                // navigator.clipboard.writeText(url)
+            };
+
+            const updateServer = () => {
+                fetch('/set_matrix', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        matrix: {
+                            matrixA,
+                            matrixB, 
+                            matrixX2,
+                            variables,
+                            size
+                        }
+                    })
+                });
+            }
+
+            React.useEffect(() => {
+                localStorage.setItem('matrixSize', size);
+                const newMatrixA = Array(size).fill().map(() => Array(size).fill(0));
+                const newMatrixX = Array(size).fill().map(() => [0]);
+                const newMatrixB = Array(size).fill().map(() => [0]);
+                const newInverseA = Array(size).fill().map(() => Array(size).fill(0));
+                const newMatrixX2 = Array(size).fill().map(() => [0]);
+                const newMatrixB2 = Array(size).fill().map(() => [0]);
+                
+                matrixA.forEach((row, rowIndex) => {
+                    if (rowIndex < size) {
+                        row.forEach((cell, colIndex) => {
+                            if (colIndex < size) {
+                                newMatrixA[rowIndex][colIndex] = cell;
+                            }
+                        });
+                    }
+                });
+
+                matrixX.forEach((row, rowIndex) => {
+                    if (rowIndex < size) {
+                        newMatrixX[rowIndex][0] = row[0];
+                    }
+                });
+
+                matrixB.forEach((row, rowIndex) => {
+                    if (rowIndex < size) {
+                        newMatrixB[rowIndex][0] = row[0];
+                    }
+                });
+
+                matrixX2.forEach((row, rowIndex) => {
+                    if (rowIndex < size) {
+                        newMatrixX2[rowIndex][0] = row[0];
+                    }
+                });
+
+                // Set bottom right element to 1 if size increased
+                if (size > matrixA.length) {
+                    newMatrixA[size-1][size-1] = 1;
+                    const nextLetter = String.fromCharCode(97 + size-1); // Start from 'a'
+                    console.log(size, nextLetter)
+                    console.log([...variables, nextLetter])
+                    setVariables([...variables, nextLetter]);
+                }
+                if (size < matrixA.length) {
+                    console.log(variables.slice(0, -1))
+                    setVariables(variables.slice(0, -1));
+                }
+
+                setMatrixA(newMatrixA);
+                setMatrixX(newMatrixX);
+                setMatrixB(newMatrixB);
+                setInverseA(newInverseA);
+                setMatrixX2(newMatrixX2);
+                setMatrixB2(newMatrixB2);
+            }, [size]);
+
+            React.useEffect(() => {
+                generateShareableLink();
+
+                updateServer();
+            }, [matrixA, matrixB, matrixX2, variables, size]);
+
+            React.useEffect(() => {
+                localStorage.setItem('matrixAValues', JSON.stringify(matrixA));
+                localStorage.setItem('matrixXValues', JSON.stringify(matrixX));
+                localStorage.setItem('matrixBValues', JSON.stringify(matrixB));
+                localStorage.setItem('matrixX2Values', JSON.stringify(matrixX2));
+                
+                try {
+                    const solution = solveLinearSystem(matrixA, matrixB);
+                    setMatrixX(solution);
+
+                    // Calculate inverse matrix
+                    const identityMatrix = Array(size).fill().map((_, i) => 
+                        Array(size).fill().map((_, j) => i === j ? 1 : 0)
+                    );
+                    
+                    const inverse = [];
+                    for (let i = 0; i < size; i++) {
+                        const column = solveLinearSystem(matrixA, identityMatrix.map(row => [row[i]]));
+                        inverse.push(column.map(x => x[0]));
+                    }
+                    
+                    // Transpose the result to get the actual inverse
+                    const inverseTransposed = inverse[0].map((_, colIndex) => 
+                        inverse.map(row => row[colIndex])
+                    );
+                    
+                    setInverseA(inverseTransposed);
+
+                    // Calculate B2 = inverse * X2
+                    const newB2 = Array(size).fill().map(() => [0]);
+                    for (let i = 0; i < size; i++) {
+                        let sum = 0;
+                        for (let j = 0; j < size; j++) {
+                            sum += inverseTransposed[i][j] * matrixX2[j][0];
+                        }
+                        newB2[i][0] = sum;
+                    }
+                    setMatrixB2(newB2);
+
+                } catch (error) {
+                    console.error('Could not solve system:', error);
+                }
+            }, [matrixA, matrixB, matrixX2, size]);
+
+            const cleanValue = (value) => {
+                if (!value) return '0';
+                // Keep decimals and negative numbers as-is
+                if (value.includes('.') || value.startsWith('-')) return value;
+                // Remove leading zeros for integers
+                return String(parseInt(value));
+            };
+
+            const generateEquations = (matrix, constants) => {
+                let equations = '';
+                for (let i = 0; i < matrix.length; i++) {
+                    let terms = [];
+                    for (let j = 0; j < matrix[i].length; j++) {
+                        const coeff = parseFloat(matrix[i][j]);
+                        if (coeff !== 0) {
+                            // Clean up coefficient string
+                            let coeffStr = String(coeff);
+                            if (coeffStr.endsWith('00001')) {
+                                coeffStr = coeffStr.replace(/0*1$/, '');
+                            } else if (coeffStr.endsWith('99999')) {
+                                coeffStr = coeffStr.replace(/9*$/, '');
+                            }
+                            const varName = variables[j] || `x${j + 1}`;
+                            terms.push(`${coeff === -1 ? coeffStr + '*' : coeffStr + '*'}${varName}`);
+                        }
+                    }
+                    if (terms.length === 0) {
+                        terms.push('0');
+                    }
+                    equations += `${terms.join(' + ').replace(/\+ -/g, '- ')} = ${constants[i][0]}\n`;
+                }
+                return equations.trim();
+            };
+
+            const handleCellChangeA = (rowIndex, colIndex, value) => {
+                const newMatrix = [...matrixA];
+                newMatrix[rowIndex][colIndex] = cleanValue(value);
+                setMatrixA(newMatrix);
+                
+                // Generate and update equations
+                const newEquations = generateEquations(newMatrix, matrixB);
+                setEquationText(newEquations);
+                localStorage.setItem('equations', newEquations);
+            };
+
+            const handleCellChangeB = (rowIndex, colIndex, value) => {
+                const newMatrix = [...matrixB];
+                newMatrix[rowIndex][0] = cleanValue(value);
+                setMatrixB(newMatrix);
+                
+                // Generate and update equations
+                const newEquations = generateEquations(matrixA, newMatrix);
+                setEquationText(newEquations);
+                localStorage.setItem('equations', newEquations);
+            };
+
+            const handleCellChangeX2 = (rowIndex, colIndex, value) => {
+                const newMatrix = [...matrixX2];
+                newMatrix[rowIndex][0] = cleanValue(value);
+                setMatrixX2(newMatrix);
+                localStorage.setItem('matrixX2Values', JSON.stringify(newMatrix));
+            };
+
+            const handleEquationsChange = (coefficients, constants, vars) => {
+                if (coefficients.length > 0) {
+                    setSize(coefficients[0].length);
+                    setMatrixA(coefficients);
+                    setMatrixB(constants);
+                    setVariables(vars);
+                    localStorage.setItem('variables', JSON.stringify(vars));
+                }
+            };
+
+            const handleVariableClick = (index) => {
+                const newName = prompt(`Enter new name for variable ${variables[index] || `x${index + 1}`}:`);
+                if (newName) {
+                    const newVariables = [...variables];
+                    newVariables[index] = newName;
+                    setVariables(newVariables);
+                    localStorage.setItem('variables', JSON.stringify(newVariables));
+                }
+            };
+
+            React.useEffect(() => {
+                // Generate and update equations when variables change
+                const newEquations = generateEquations(matrixA, matrixB);
+                setEquationText(newEquations);
+                localStorage.setItem('equations', newEquations);
+            }, [variables]);
+
+            return (
+                <div className="matrix-container">
+                    <div className="size-control">
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <button 
+                                onClick={() => setSize(Math.max(1, size - 1))}
+                                style={{ padding: '4px 8px' }}
+                            >
+                                &lt;
+                            </button>
+                            <button
+                                onClick={() => setSize(size + 1)}
+                                style={{ padding: '4px 8px' }}
+                            >
+                                &gt;
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div className="matrix-wrapper">
+                        <div style={{display: 'flex', flexDirection: 'column', gap: '20px'}}>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '20px'}}>
+                                <MatrixRenderer 
+                                    matrix={matrixA}
+                                    name="A"
+                                    handleCellChange={handleCellChangeA}
+                                    top_label={variables}
+                                    onVariableClick={handleVariableClick}
+                                />
+                                <MatrixRenderer
+                                    matrix={matrixX}
+                                    name="x"
+                                    readOnly={true}
+                                    handleCellChange={() => {}}
+                                    left_label={variables}
+                                />
+                                <span className="matrix-separator">=</span>
+                                <MatrixRenderer
+                                    matrix={matrixB}
+                                    name="b"
+                                    handleCellChange={handleCellChangeB}
+                                />
+                            </div>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '20px'}}>
+                                <MatrixRenderer
+                                    matrix={inverseA}
+                                    name="A'"
+                                    readOnly={true}
+                                    handleCellChange={() => {}}
+                                />
+                                <MatrixRenderer
+                                    matrix={matrixX2}
+                                    name="b₂"
+                                    readOnly={false}
+                                    handleCellChange={handleCellChangeX2}
+                                />
+                                <span className="matrix-separator">=</span>
+                                <MatrixRenderer
+                                    matrix={matrixB2}
+                                    name="x₂"
+                                    readOnly={true}
+                                    handleCellChange={() => {}}
+                                    left_label={variables}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                    <EquationInput onEquationsChange={handleEquationsChange} initialText={equationText} />
+                </div>
+            );
+        }
+
+        
+        function SimpleMatrix() {
+            // Get data from URL if it exists
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlData = urlParams.get('simple_data');
+            let initialData = null;
+            
+            if (urlData) {
+                try {
+                    initialData = JSON.parse(atob(urlData));
+                } catch (e) {
+                    console.error('Failed to parse URL data');
+                }
+            }
+
+            const [size, setSize] = React.useState(() => {
+                if (initialData) return initialData.size;
+                const savedSize = localStorage.getItem('simple_matrixSize');
+                return savedSize ? parseInt(savedSize) : 2;
+            });
+            
+            const [matrixA, setMatrixA] = React.useState(() => {
+                if (initialData) return initialData.matrixA;
+                const savedMatrix = localStorage.getItem('simple_matrixAValues');
+                if (savedMatrix) {
+                    return JSON.parse(savedMatrix);
+                }
+                return Array(size).fill().map(() => Array(size).fill(0));
+            });
+
+            const [matrixX, setMatrixX] = React.useState(() => {
+                if (initialData) return initialData.matrixX;
+                const savedMatrix = localStorage.getItem('simple_matrixXValues');
+                if (savedMatrix) {
+                    return JSON.parse(savedMatrix);
+                }
+                return Array(size).fill().map(() => [0]);
+            });
+
+            const [matrixB, setMatrixB] = React.useState(() => {
+                if (initialData) return initialData.matrixB;
+                const savedMatrix = localStorage.getItem('simple_matrixBValues');
+                if (savedMatrix) {
+                    return JSON.parse(savedMatrix);
+                }
+                return Array(size).fill().map(() => [0]);
+            });
+
+            const [variables, setVariables] = React.useState(() => {
+                if (initialData) return initialData.variables;
+                const savedVariables = localStorage.getItem('simple_variables');
+                if (savedVariables) {
+                    return JSON.parse(savedVariables);
+                }
+                return [];
+            });
+            const [equationText, setEquationText] = React.useState('');
+
+            const generateShareableLink = () => {
+                const data = {
+                    size,
+                    matrixA,
+                    matrixX,
+                    matrixB,
+                    variables
+                };
+                const encoded = btoa(JSON.stringify(data));
+                const url = `${window.location.origin}${window.location.pathname}?simple_data=${encoded}`;
+                
+                // Update URL without reloading
+                window.history.pushState({}, '', url);
+                // Copy to clipboard
+                // navigator.clipboard.writeText(url)
+            };
+
+            const updateServer = () => {
+                fetch('/set_matrix', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        matrix: {
+                            matrixA,
+                            matrixB,
+                            variables,
+                            size
+                        }
+                    })
+                });
+            }
+
+            React.useEffect(() => {
+                localStorage.setItem('simple_matrixSize', size);
+                const newMatrixA = Array(size).fill().map(() => Array(size).fill(0));
+                const newMatrixX = Array(size).fill().map(() => [0]);
+                const newMatrixB = Array(size).fill().map(() => [0]);
+                
+                matrixA.forEach((row, rowIndex) => {
+                    if (rowIndex < size) {
+                        row.forEach((cell, colIndex) => {
+                            if (colIndex < size) {
+                                newMatrixA[rowIndex][colIndex] = cell;
+                            }
+                        });
+                    }
+                });
+
+                matrixX.forEach((row, rowIndex) => {
+                    if (rowIndex < size) {
+                        newMatrixX[rowIndex][0] = row[0];
+                    }
+                });
+
+                matrixB.forEach((row, rowIndex) => {
+                    if (rowIndex < size) {
+                        newMatrixB[rowIndex][0] = row[0];
+                    }
+                });
+
+                // Set bottom right element to 1 if size increased
+                if (size > matrixA.length) {
+                    newMatrixA[size-1][size-1] = 1;
+                    const nextLetter = String.fromCharCode(97 + size-1); // Start from 'a'
+                    console.log(size, nextLetter)
+                    console.log([...variables, nextLetter])
+                    setVariables([...variables, nextLetter]);
+                }
+                if (size < matrixA.length) {
+                    console.log(variables.slice(0, -1))
+                    setVariables(variables.slice(0, -1));
+                }
+
+                setMatrixA(newMatrixA);
+                setMatrixX(newMatrixX);
+                setMatrixB(newMatrixB);
+            }, [size]);
+
+            React.useEffect(() => {
+                generateShareableLink();
+                updateServer();
+            }, [matrixA, matrixB, variables, size]);
+
+            React.useEffect(() => {
+                localStorage.setItem('simple_matrixAValues', JSON.stringify(matrixA));
+                localStorage.setItem('simple_matrixXValues', JSON.stringify(matrixX));
+                localStorage.setItem('simple_matrixBValues', JSON.stringify(matrixB));
+            }, [matrixA, matrixB, size]);
+
+            const cleanValue = (value) => {
+                if (!value) return '0';
+                // Keep decimals and negative numbers as-is
+                if (value.includes('.') || value.startsWith('-')) return value;
+                // Remove leading zeros for integers
+                return String(parseInt(value));
+            };
+
+            const generateEquations = (matrix, constants) => {
+                let equations = '';
+                for (let i = 0; i < matrix.length; i++) {
+                    let terms = [];
+                    for (let j = 0; j < matrix[i].length; j++) {
+                        const coeff = parseFloat(matrix[i][j]);
+                        if (coeff !== 0) {
+                            // Clean up coefficient string
+                            let coeffStr = String(coeff);
+                            if (coeffStr.endsWith('00001')) {
+                                coeffStr = coeffStr.replace(/0*1$/, '');
+                            } else if (coeffStr.endsWith('99999')) {
+                                coeffStr = coeffStr.replace(/9*$/, '');
+                            }
+                            const varName = variables[j] || `x${j + 1}`;
+                            terms.push(`${coeff === -1 ? coeffStr + '*' : coeffStr + '*'}${varName}`);
+                        }
+                    }
+                    if (terms.length === 0) {
+                        terms.push('0');
+                    }
+                    equations += `${terms.join(' + ').replace(/\+ -/g, '- ')} = ${constants[i][0]}\n`;
+                }
+                return equations.trim();
+            };
+
+            const handleCellChangeA = (rowIndex, colIndex, value) => {
+                const newMatrix = [...matrixA];
+                newMatrix[rowIndex][colIndex] = cleanValue(value);
+                setMatrixA(newMatrix);
+                
+                // Calculate new B matrix by multiplying A and X
+                const newMatrixB = Array(size).fill().map(() => [0]);
+                for (let i = 0; i < size; i++) {
+                    let sum = 0;
+                    for (let j = 0; j < size; j++) {
+                        sum += parseFloat(newMatrix[i][j]) * parseFloat(matrixX[j][0]);
+                    }
+                    newMatrixB[i][0] = String(sum);
+                }
+                setMatrixB(newMatrixB);
+                
+                // Generate and update equations
+                const newEquations = generateEquations(newMatrix, newMatrixB);
+                setEquationText(newEquations);
+                localStorage.setItem('simple_equations', newEquations);
+            };
+
+            const handleCellChangeB = (rowIndex, colIndex, value) => {
+                // B matrix is now read-only since it's calculated from A * X
+                return;
+            };
+
+            const handleCellChangeX = (rowIndex, colIndex, value) => {
+                const newMatrix = [...matrixX];
+                newMatrix[rowIndex][colIndex] = cleanValue(value);
+                setMatrixX(newMatrix);
+
+                // Calculate new B matrix by multiplying A and X
+                const newMatrixB = Array(size).fill().map(() => [0]);
+                for (let i = 0; i < size; i++) {
+                    let sum = 0;
+                    for (let j = 0; j < size; j++) {
+                        sum += parseFloat(matrixA[i][j]) * parseFloat(newMatrix[j][0]);
+                    }
+                    newMatrixB[i][0] = String(sum);
+                }
+                setMatrixB(newMatrixB);
+            };
+
+            const handleEquationsChange = (coefficients, constants, vars) => {
+                if (coefficients.length > 0) {
+                    setSize(coefficients[0].length);
+                    setMatrixA(coefficients);
+                    setMatrixB(constants);
+                    setVariables(vars);
+                    localStorage.setItem('simple_variables', JSON.stringify(vars));
+                }
+            };
+
+            const handleVariableClick = (index) => {
+                const newName = prompt(`Enter new name for variable ${variables[index] || `x${index + 1}`}:`);
+                if (newName) {
+                    const newVariables = [...variables];
+                    newVariables[index] = newName;
+                    setVariables(newVariables);
+                    localStorage.setItem('simple_variables', JSON.stringify(newVariables));
+                }
+            };
+
+            React.useEffect(() => {
+                // Generate and update equations when variables change
+                const newEquations = generateEquations(matrixA, matrixB);
+                setEquationText(newEquations);
+                localStorage.setItem('simple_equations', newEquations);
+            }, [variables]);
+
+            return (
+                <div className="matrix-container">
+                    <div className="size-control">
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <button 
+                                onClick={() => setSize(Math.max(1, size - 1))}
+                                style={{ padding: '4px 8px' }}
+                            >
+                                &lt;
+                            </button>
+                            <button
+                                onClick={() => setSize(size + 1)}
+                                style={{ padding: '4px 8px' }}
+                            >
+                                &gt;
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div className="matrix-wrapper">
+                        <div style={{display: 'flex', flexDirection: 'column', gap: '20px'}}>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '20px'}}>
+                                <MatrixRenderer 
+                                    matrix={matrixA}
+                                    name="A"
+                                    handleCellChange={handleCellChangeA}
+                                    top_label={variables}
+                                    onVariableClick={handleVariableClick}
+                                />
+                                <MatrixRenderer
+                                    matrix={matrixX}
+                                    name="x"
+                                    readOnly={false}
+                                    handleCellChange={handleCellChangeX}
+                                    left_label={variables}
+                                />
+                                <span className="matrix-separator">=</span>
+                                <MatrixRenderer
+                                    matrix={matrixB}
+                                    name="b"
+                                    readOnly={true}
+                                    handleCellChange={() => {}}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                    <EquationInput onEquationsChange={handleEquationsChange} initialText={equationText} />
+                </div>
+            );
+        }
+        
+        function EquationInput({ onEquationsChange, initialText }) {
+            const [equations, setEquations] = React.useState('');
+            
+            React.useEffect(() => {
+                if (initialText) {
+                    setEquations(initialText);
+                } else {
+                    const savedEquations = localStorage.getItem('equations');
+                    if (savedEquations) {
+                        setEquations(savedEquations);
+                    }
+                }
+
+                // Parse and apply equations on initial load
+                const savedEquations = localStorage.getItem('equations');
+            }, [initialText]);
+
+            const parseEquations = (text) => {
+                const lines = text.trim().split('\n').filter(line => line.trim());
+                const coefficients = [];
+                const constants = [];
+                const variables = new Set();
+
+                // First pass - collect all variables
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    if (!trimmedLine.includes('=')) {
+                        return { coefficients: [], constants: [], variables: [] };
+                    }
+
+                    const [leftSide, rightSide] = trimmedLine.split('=').map(s => s.trim());
+
+                    // Handle y = mx + b format
+                    if (leftSide.toLowerCase() === 'y') {
+                        variables.add('x');
+                        variables.add('y');
+                        continue;
+                    }
+
+                    // Handle standard format - now supporting * for multiplication
+                    const terms = leftSide.replace(/\s+/g, '')
+                        .replace(/\*/g, '') // Remove * symbols
+                        .match(/[+-]?\d*\.?\d*[a-zA-Z_][a-zA-Z0-9_]*|[+-]?\d+\.?\d*/g) || [];
+                    terms.forEach(term => {
+                        const varMatch = term.match(/[a-zA-Z_][a-zA-Z0-9_]*/);
+                        if (varMatch) {
+                            variables.add(varMatch[0]);
+                        }
+                    });
+                }
+
+                // Sort variables once
+                const orderedVariables = Array.from(variables).sort();
+
+                // Second pass - build coefficient arrays
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    const [leftSide, rightSide] = trimmedLine.split('=').map(s => s.trim());
+
+                    // Handle y = mx + b format
+                    if (leftSide.toLowerCase() === 'y') {
+                        const terms = rightSide.replace(/\s+/g, '')
+                            .replace(/\*/g, '') // Remove * symbols
+                            .match(/[+-]?\d*\.?\d*[a-zA-Z_][a-zA-Z0-9_]*|[+-]?\d+\.?\d*/g) || [];
+                        const coeff = new Array(orderedVariables.length).fill(0);
+                        let constant = 0;
+
+                        terms.forEach(term => {
+                            if (/[a-zA-Z_]/.test(term)) {
+                                const varName = term.match(/[a-zA-Z_][a-zA-Z0-9_]*/)[0];
+                                const coefficient = term.replace(varName, '') || '1';
+                                const varIndex = orderedVariables.indexOf(varName);
+                                coeff[varIndex] = -parseFloat(coefficient || '1');
+                            } else {
+                                constant = parseFloat(term || '0');
+                            }
+                        });
+                        const yIndex = orderedVariables.indexOf('y');
+                        coeff[yIndex] = 1;
+                        coefficients.push(coeff);
+                        constants.push([constant]);
+                        continue;
+                    }
+
+                    // Handle standard format - now supporting * for multiplication
+                    const terms = leftSide.replace(/\s+/g, '')
+                        .replace(/\*/g, '') // Remove * symbols
+                        .match(/[+-]?\d*\.?\d*[a-zA-Z_][a-zA-Z0-9_]*|[+-]?\d+\.?\d*/g) || [];
+                    const coeff = new Array(orderedVariables.length).fill(0);
+                    
+                    terms.forEach(term => {
+                        const varMatch = term.match(/[a-zA-Z_][a-zA-Z0-9_]*/);
+                        if (varMatch) {
+                            const variable = varMatch[0];
+                            const coefficient = term.replace(variable, '') || '1';
+                            const varIndex = orderedVariables.indexOf(variable);
+                            coeff[varIndex] = parseFloat(coefficient || '1');
+                        }
+                    });
+
+                    coefficients.push(coeff);
+                    constants.push([parseFloat(rightSide)]);
+                }
+
+                return {
+                    coefficients,
+                    constants,
+                    variables: orderedVariables
+                };
+            };
+
+            const handleChange = (e) => {
+                const newValue = e.target.value;
+                setEquations(newValue);
+                localStorage.setItem('equations', newValue);
+            };
+
+            const handleApply = () => {
+                const { coefficients, constants, variables } = parseEquations(equations);
+                if (coefficients.length && constants.length) {
+                    onEquationsChange(coefficients, constants, variables);
+                }
+            };
+
+            return (
+                <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                    <pre
+                        style={{
+                            width: '500px',
+                            height: '300px',
+                            backgroundColor: 'transparent', 
+                            color: '#666',
+                            border: 'none',
+                            padding: '10px',
+                            fontFamily: 'monospace',
+                            marginTop: '30px',
+                            scrollbarWidth: 'thin',
+                            scrollbarColor: 'rgba(50, 50, 50, 0.5) transparent',
+                            outline: 'none',
+                            whiteSpace: 'pre-wrap',
+                            overflowY: 'auto',
+                            lineHeight: '1.5em' // Adds ~5px spacing between lines
+                        }}
+                    >
+                        {equations}
+                    </pre>
+                    {/* <button onClick={handleApply} style={{ padding: '8px 16px' }}>
+                        Apply Equations
+                    </button> */}
+                </div>
+            );
+        }
+
+        function App() {
+            return (
+                <div>
+                    <Matrix />
+                    <SimpleMatrix />
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
